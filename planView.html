@@ -1,0 +1,2399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codex Rollout — Program Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:       #E9E7DE;
+  --surface:  #FFFFFF;
+  --border:   #D8D5CB;
+  --border-md:#B8B4A8;
+  --text:     #17150F;
+  --muted:    #56534C;
+  --faint:    #8E8B84;
+  --done:     #166534; --donebg: #DCFCE7; --doneborder: #86EFAC;
+  --wip:      #92400E; --wipbg:  #FEF3C7; --wipborder:  #FCD34D;
+  --todo:     #374151; --todobg: #F1F5F9; --todoborder: #CBD5E1;
+  --blocked:  #7F1D1D; --blockedbg:#FEE2E2; --blockedborder:#FCA5A5;
+  --over:     #7F1D1D; --overbg: #FEE2E2;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+}
+body { font-family: var(--sans); background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* ── TOP BAR ─────────────────────────────────────────────────────────── */
+.topbar {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0 28px; height: 52px; display: flex; align-items: center;
+  justify-content: space-between; position: sticky; top: 0; z-index: 300;
+}
+.topbar-brand { display: flex; align-items: baseline; gap: 8px; }
+.topbar-title { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
+.topbar-sub   { font-size: 11px; color: var(--faint); font-family: var(--mono); }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.last-updated { font-size: 11px; font-family: var(--mono); color: var(--faint); }
+.load-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--sans); font-size: 12px; font-weight: 500;
+  padding: 5px 13px; background: var(--text); color: #fff;
+  border: none; border-radius: 6px; cursor: pointer; transition: opacity .15s;
+}
+.load-btn:hover { opacity: .8; }
+#file-input { display: none; }
+
+/* ── MAIN ────────────────────────────────────────────────────────────── */
+.main { max-width: 1080px; margin: 0 auto; padding: 22px 28px 64px; }
+
+/* ── VIEW TABS ────────────────────────────────────────────────────────── */
+.view-tab {
+  padding: 14px 16px; cursor: pointer; text-align: center; font-weight: 600;
+  font-size: 13px; letter-spacing: -0.01em; transition: all 0.15s ease;
+  border-right: 1px solid var(--border);
+}
+.view-tab:last-child { border-right: none; }
+.view-tab:hover { background: #F9F8F5; }
+.view-tab.active {
+  background: linear-gradient(135deg, #FDF0E6 0%, #FFFFFF 100%);
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: inset 0 -3px 0 #B5540A;
+}
+.view-tab:not(.active) {
+  background: var(--surface);
+  color: var(--muted);
+}
+
+/* ── PHASE TABS ──────────────────────────────────────────────────────── */
+.phase-tabs {
+  display: grid; grid-template-columns: repeat(4,1fr);
+  margin-bottom: 16px; border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+}
+.phase-tab {
+  background: var(--surface); padding: 16px 14px 14px;
+  cursor: pointer; text-align: left; transition: background .1s;
+  border-right: 1px solid var(--border);
+}
+.phase-tab:last-child { border-right: none; }
+.phase-tab:hover { background: var(--bg); }
+.phase-tab.active { background: var(--surface); box-shadow: inset 0 -3px 0 currentColor; }
+.tab-num   { font-family: var(--mono); font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .12em; margin-bottom: 4px; }
+.tab-name  { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; letter-spacing: -.01em; }
+.tab-dates { font-size: 10px; font-family: var(--mono); color: var(--muted); margin-bottom: 8px; }
+.tab-gate  { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 4px; display: inline-block; margin-bottom: 10px; }
+.tab-bar-wrap { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.tab-bar   { height: 100%; border-radius: 2px; transition: width .4s ease; }
+.tab-counts { display: flex; gap: 8px; font-size: 10px; font-family: var(--mono); color: var(--faint); margin-top: 6px; }
+.tab-counts span { display: flex; align-items: center; gap: 3px; }
+.mini-dot  { display: inline-block; width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── DETAIL PANEL ────────────────────────────────────────────────────── */
+.detail-panel { display: none; }
+.detail-panel.visible { display: block; }
+
+/* Phase header */
+.phase-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px 10px 0 0; padding: 16px 20px; border-bottom: none;
+}
+.ph-left .ph-label { font-family: var(--mono); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; }
+.ph-left .ph-title { font-size: 15px; font-weight: 600; letter-spacing: -.02em; margin-bottom: 6px; }
+.ph-left .ph-why   { font-size: 12px; color: var(--muted); line-height: 1.6; max-width: 580px; }
+.ph-right          { text-align: right; flex-shrink: 0; padding-left: 20px; }
+.ph-gate           { font-size: 11px; font-family: var(--mono); color: var(--muted); margin-bottom: 4px; }
+.ph-dates          { font-size: 11px; font-family: var(--mono); color: var(--faint); }
+
+/* Stats strip */
+.stats-strip {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--border);
+  border-top: 1px solid var(--border-md); padding: 10px 20px;
+}
+.stat-pill {
+  font-size: 11px; font-family: var(--mono); padding: 3px 9px;
+  border-radius: 20px; display: inline-flex; align-items: center; gap: 5px;
+}
+.stat-dot { width: 6px; height: 6px; border-radius: 50%; }
+.sp-total    { background: var(--todobg); color: var(--muted); }
+.sp-done     { background: var(--donebg); color: var(--done); }
+.sp-wip      { background: var(--wipbg);  color: var(--wip); }
+.sp-todo     { background: var(--todobg); color: var(--todo); }
+.sp-overdue  { background: var(--overbg); color: var(--over); }
+.stats-sep   { color: var(--border-md); font-size: 14px; margin: 0 2px; }
+
+/* Toggle button */
+.toggle-bar {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 10px 20px; border-top: none;
+}
+.toggle-label { font-size: 11px; font-family: var(--mono); color: var(--faint); }
+.toggle-switch {
+  width: 40px; height: 22px; background: var(--border);
+  border-radius: 11px; cursor: pointer; position: relative;
+  transition: background .2s; border: 1px solid var(--border-md);
+}
+.toggle-switch.active { background: var(--done); border-color: var(--done); }
+.toggle-switch-dot {
+  width: 18px; height: 18px; background: white;
+  border-radius: 50%; position: absolute;
+  top: 2px; left: 2px; transition: left .2s;
+}
+.toggle-switch.active .toggle-switch-dot { left: 20px; }
+
+/* ── TASK TABLE ──────────────────────────────────────────────────────── */
+.task-table {
+  background: var(--surface); border: 1px solid var(--border);
+  border-top: none; border-radius: 0 0 10px 10px; overflow: hidden;
+}
+.col-grid {
+  display: grid;
+  grid-template-columns: 118px 1fr 162px 78px 96px;
+}
+.table-header {
+  padding: 8px 16px; border-bottom: 2px solid var(--border-md);
+  background: #E0DDD3;
+}
+.th { font-size: 10px; font-family: var(--mono); font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+
+/* Task row */
+.task-row-wrap { border-bottom: 1px solid var(--border); }
+.task-row-wrap:last-child { border-bottom: none; }
+.task-row-wrap.hidden { display: none; }
+.task-row-wrap.completed { background: #F5F5F5; }
+.task-row {
+  align-items: center; padding: 10px 16px; cursor: pointer;
+  transition: background .1s; user-select: none;
+}
+.task-row:hover   { background: #F0EDE4; }
+.task-row.is-open { background: #EAE7DE; }
+.task-row-wrap.completed .task-row:hover { background: #F5F5F5; }
+
+/* WS tag */
+.ws-tag {
+  font-size: 10px; font-family: var(--mono); font-weight: 600;
+  padding: 3px 8px; border-radius: 4px; display: inline-block;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 106px;
+  border: 1px solid currentColor; opacity: .85;
+}
+
+/* Task name cell */
+.task-name-cell { padding-right: 16px; }
+.task-name { font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--text); }
+.task-name.done { color: var(--faint); font-weight: 400; text-decoration: line-through; text-decoration-color: var(--border-md); }
+.task-note { font-size: 11px; color: var(--muted); line-height: 1.4; margin-top: 3px; }
+
+/* Due date */
+.task-due { font-size: 11px; font-family: var(--mono); color: var(--muted); }
+.task-due.overdue { color: var(--over); font-weight: 600; }
+.task-due.soon    { color: var(--wip); font-weight: 500; }
+
+/* Progress (col 3 on parent rows) */
+.progress-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.progress-bar-wrap { width: 90px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.progress-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+.progress-label { font-size: 10px; font-family: var(--mono); font-weight: 500; color: var(--muted); }
+.progress-label.all-done { color: var(--done); font-weight: 600; }
+
+/* Status badge */
+.status-badge {
+  font-size: 10px; font-family: var(--mono); font-weight: 600;
+  padding: 3px 9px; border-radius: 5px; white-space: nowrap;
+  display: inline-block; text-align: center; border-width: 1px; border-style: solid;
+}
+.sb-complete   { background: var(--donebg);    color: var(--done);    border-color: var(--doneborder); }
+.sb-wip        { background: var(--wipbg);     color: var(--wip);     border-color: var(--wipborder); }
+.sb-notstarted { background: var(--todobg);    color: var(--todo);    border-color: var(--todoborder); }
+.sb-blocked    { background: var(--blockedbg); color: var(--blocked); border-color: var(--blockedborder); }
+
+/* Expand indicator */
+.expand-chevron { font-size: 10px; color: var(--faint); transition: transform .15s; margin-left: 5px; display: inline-block; }
+.is-open .expand-chevron { transform: rotate(90deg); }
+
+/* ── SUBTASK DRAWER ──────────────────────────────────────────────────── */
+.sub-drawer { display: none; background: var(--surface); border-top: 1px dashed var(--border); border-left: 3px solid var(--border-md); }
+.sub-drawer.open { display: block; }
+.sub-drawer-inner { padding: 0; }
+
+.sub-row {
+  align-items: flex-start; padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.sub-row:last-child { border-bottom: none; }
+.sub-row:hover { background: #EDE9DF; }
+.sub-row.sub-done { background: #F5F5F5; }
+.sub-row.sub-done:hover { background: #F5F5F5; }
+.sub-row.sub-done .sub-name { color: var(--faint); font-weight: 400; text-decoration: line-through; text-decoration-color: var(--border-md); }
+.sub-row.hidden { display: none; }
+
+.sub-dot-cell { display: flex; align-items: flex-start; padding-top: 3px; padding-left: 26px; }
+.sub-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.dot-done    { background: var(--done); }
+.dot-wip     { background: var(--wip); }
+.dot-todo    { background: var(--border-md); }
+.dot-blocked { background: var(--blocked); }
+
+.sub-name-wrap { padding-right: 14px; }
+.sub-name      { font-size: 12px; font-weight: 500; line-height: 1.4; color: var(--text); }
+.sub-notes     { font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+.sub-owner-col { font-size: 10px; font-family: var(--mono); color: var(--faint); align-self: center; }
+.sub-due   { font-size: 11px; font-family: var(--mono); color: var(--muted); }
+.sub-due.overdue { color: var(--over); font-weight: 600; }
+
+/* ── RISK SECTION ────────────────────────────────────────────────────── */
+.risks-wrap {
+  margin-top: 12px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+}
+.risks-header {
+  padding: 10px 18px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--muted); background: #FEF9F8;
+  border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px;
+}
+.risk-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 18px; border-bottom: 1px solid var(--border);
+  font-size: 12px; line-height: 1.5;
+}
+.risk-row:last-child { border-bottom: none; }
+.risk-icon  { color: var(--over); flex-shrink: 0; font-size: 13px; margin-top: 1px; }
+.risk-title { font-weight: 500; color: var(--over); }
+.risk-body  { color: var(--muted); margin-top: 2px; font-size: 11px; }
+.no-risks   { padding: 12px 18px; font-size: 12px; color: var(--faint); }
+
+/* ── LEGEND ──────────────────────────────────────────────────────────── */
+.legend-strip {
+  margin-top: 12px; display: flex; align-items: center; gap: 14px;
+  font-size: 11px; color: var(--muted); flex-wrap: wrap;
+}
+.legend-item { display: flex; align-items: center; gap: 5px; }
+
+/* ── EMPTY STATE ─────────────────────────────────────────────────────── */
+.empty-state { text-align: center; padding: 80px 24px; }
+.empty-icon  { font-size: 38px; margin-bottom: 14px; opacity: .4; }
+.empty-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+.empty-sub   { font-size: 13px; color: var(--muted); line-height: 1.7; max-width: 360px; margin: 0 auto 22px; }
+
+.no-results { padding: 24px; text-align: center; font-size: 12px; color: var(--faint); border-radius: 0 0 10px 10px; }
+
+@media (max-width: 740px) {
+  .main { padding: 12px; }
+  .phase-tabs { grid-template-columns: repeat(2,1fr); border-radius: 8px; }
+  .col-grid { grid-template-columns: 80px 1fr 80px !important; }
+  .col-grid > *:nth-child(4), .col-grid > *:nth-child(5) { display: none; }
+  .topbar { padding: 0 14px; }
+}
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-brand">
+    <div class="topbar-title">Codex Rollout</div>
+    <div class="topbar-sub">program status</div>
+  </div>
+  <div class="topbar-right">
+    <div class="last-updated" id="last-updated"></div>
+  </div>
+</div>
+
+<div class="main">
+  <!-- CONTENT (shown by default since data is embedded) -->
+  <div id="content">
+    <!-- View selector tabs -->
+    <div style="display: grid; grid-template-columns: repeat(2,1fr); margin-bottom: 20px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;">
+      <div id="view-tab-waves" class="view-tab active" style="background: var(--surface); padding: 14px 16px; cursor: pointer; text-align: center; font-weight: 500; color: var(--text); border-right: 1px solid var(--border);" onclick="switchView('waves')">Waves 1 & 2</div>
+      <div id="view-tab-rollout" class="view-tab" style="background: var(--surface); padding: 14px 16px; cursor: pointer; text-align: center; font-weight: 500; color: var(--muted);" onclick="switchView('fullrollout')">Full Rollout</div>
+    </div>
+
+    <!-- Waves 1 & 2 view (phase-based) -->
+    <div id="view-waves" class="view-content">
+      <div class="phase-tabs" id="phase-tabs"></div>
+      <div id="detail-panel" class="detail-panel"></div>
+    </div>
+
+    <!-- Full Rollout view (phase-based, same structure) -->
+    <div id="view-fullrollout" class="view-content" style="display:none">
+      <div class="phase-tabs" id="phase-tabs-rollout"></div>
+      <div id="detail-panel-rollout" class="detail-panel"></div>
+    </div>
+  </div>
+</div>
+
+<!-- EMBEDDED DATA (injected by PowerAutomate) -->
+<script id="embedded-data" type="application/json">
+{
+  "waves": {
+    "Pre-conditions": {
+      "tasks": [
+        {
+          "id": "task_2",
+          "name": "Program Mgmt",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Program Mgmt",
+          "subtasks": [
+            {
+              "id": "sub_3",
+              "name": "Updated Project Plan",
+              "owner": "Luke",
+              "date": "2026-04-02T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_4",
+              "name": "OTLT presentation \u2014 cost structure + Phase 2 deliverables status",
+              "owner": "Amy",
+              "date": "2026-04-03T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_5",
+              "name": "Wave 2 deep-dive working session",
+              "owner": "Luke & Amy",
+              "date": "2026-04-21T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_6",
+              "name": "Assess other vectors for requesting Codex",
+              "owner": null,
+              "date": "TBD",
+              "notes": "Other ways to get Codex should be shut down when we start pilots.  Added by Tami on 4/21",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_7",
+              "name": "Plan/Decision on handling Codex requests from business",
+              "owner": null,
+              "date": "TBD",
+              "notes": "Added by Amy; 4/23",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        },
+        {
+          "id": "task_8",
+          "name": "SCIM / SSO integration and role mapping",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Access",
+          "subtasks": [
+            {
+              "id": "sub_9",
+              "name": "SSO configured",
+              "owner": "Uriah N/Linda Halvorson J",
+              "date": "2026-03-24T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_10",
+              "name": "Role Mapping : Groups",
+              "owner": "Uriah N/Linda Halvorson J",
+              "date": null,
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_11",
+              "name": "SCIM/SSO integration",
+              "owner": "Uriah & Erich O'Donnel",
+              "date": "2026-04-22T00:00:00",
+              "notes": "Necessary for Wave 2 (determined 4/22)",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_12",
+              "name": "Automated pre-req completion to license provisioning pipeline",
+              "owner": "Uriah N / Eilyn Araya / Roshan",
+              "date": "2026-04-19T00:00:00",
+              "notes": "4/17: process is partially automated (2x/day csv pull, not nightly batch).",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_13",
+              "name": "Align handoff process: OTU completion report to licensing provisioning",
+              "owner": "Michelle M / Uriah N / Roshan",
+              "date": "2026-04-18T00:00:00",
+              "notes": "Must happen before Monday 4/20.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_14",
+              "name": "Legacy OpenAI account remediation",
+              "owner": "Roshan / OpenAI",
+              "date": "tbd",
+              "notes": "Out of 1,206 non-Business or Free accounts, 1,038 had 0 messages in the last 28 days.\n\t\u2022Cohort1a: 164 zero-use accounts were created after March 19, 2026, representing the most immediate activation opportunity.\n\t\u2022Cohort1b: 299 who had free account created and a duplicate business account and never the free account. \n\t\u2022Cohort2 :  874 zero-use accounts were created on or before March 19, 2026, indicating an older dormant population that should be reviewed with OpenAI. \n\t\u2022Among active non-Business accounts, Cohort3 : 49 had 1-9 messages, Cohort4 : 77 had 10-99, and Cohort5 : 42 had 100+",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_15",
+          "name": "Mac Dev Experience",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "DevEx",
+          "subtasks": [
+            {
+              "id": "sub_16",
+              "name": "Identify path for installing within the Mac OS",
+              "owner": "Brian W",
+              "date": "2026-03-27T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_17",
+              "name": "Codex Mac Desktop",
+              "owner": "Brian W",
+              "date": "2026-04-06T00:00:00",
+              "notes": "Awaiting Security Review (4/6)",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_18",
+              "name": "Codex Mac CLI",
+              "owner": "Brian W",
+              "date": "2026-04-03T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_19",
+              "name": "Codex Available in App Store",
+              "owner": "Brian W",
+              "date": "2026-04-03T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_20",
+              "name": "Verify Mac experience is fully done",
+              "owner": "Brian",
+              "date": "2026-04-21T00:00:00",
+              "notes": "added 4/21 call.",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_21",
+          "name": "Windows Dev Experience",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "DevEx",
+          "subtasks": [
+            {
+              "id": "sub_22",
+              "name": "Identify team to work with to pilot solutions",
+              "owner": "Brian W",
+              "date": "2026-03-24T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_23",
+              "name": "PoC: toolset within DMS",
+              "owner": "Brian W",
+              "date": "2026-03-27T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_24",
+              "name": "User Managed Software Installation \u2014 define and validate process",
+              "owner": "Brian W",
+              "date": "2026-04-10T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_25",
+              "name": "App Store Request Process \u2014 define certification path",
+              "owner": "Brian W",
+              "date": "2026-04-03T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_26",
+              "name": "Codex Windows CLI",
+              "owner": "Brian W",
+              "date": "2026-01-01T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_27",
+              "name": "Codex Windows Desktop",
+              "owner": "Linda Halvorson",
+              "date": null,
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_28",
+              "name": "Codex Windows Desktop in App Store",
+              "owner": "Linda Halvorson",
+              "date": "2026-04-24T00:00:00",
+              "notes": "4/17: working session - Codex wont be in the app store until Friday April 24 at the earliest",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_29",
+              "name": "Admin permissions in Windows",
+              "owner": "Kurt",
+              "date": null,
+              "notes": "Kurt is working on a link/process for users to request a restriction exception to gain access; this is the complication",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_30",
+              "name": "Windows Auto-update  risk assessment",
+              "owner": "Brian W",
+              "date": null,
+              "notes": "MSIX is the required format. Certificate handling still under review (Linda Halvorson/engineering). If certs aren't resolved, Windows installs may fail even with correct MSIX. Dependency for Wave 1 Windows users.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_31",
+              "name": "Document known issues with standard workarounds",
+              "owner": "Brian W",
+              "date": "2026-04-25T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_32",
+              "name": "Wave-2 access via App Store (exit CSV manual loop)",
+              "owner": "Brian W",
+              "date": "2026-04-25T00:00:00",
+              "notes": "Ensure App Store groups + bulk-load path ready for Wave 2 so Roshan/Sanjit exit CSV manual loop. Apply same methodology to Claude Code rollout.",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        }
+      ],
+      "wsOrder": [
+        "Program Mgmt",
+        "Access",
+        "DevEx"
+      ]
+    },
+    "Enablement": {
+      "tasks": [
+        {
+          "id": "task_33",
+          "name": "Rollout Prep",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Training",
+          "subtasks": [
+            {
+              "id": "sub_34",
+              "name": "User segmentation definition for Training Pathways",
+              "owner": "Michelle M",
+              "date": "2026-04-01T00:00:00",
+              "notes": "Needed to drive role-based training pathways and wave planning",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_35",
+              "name": "Pre-req decision tree",
+              "owner": "Lynn Vollbrecht",
+              "date": "2026-04-01T00:00:00",
+              "notes": "task for a \"decision tree for pre-reqs\" to route users to the right training path.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_36",
+              "name": "7-stage technical course sign-off",
+              "owner": "Joydeep",
+              "date": "2026-04-06T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_37",
+              "name": "Pre-license training content",
+              "owner": "Michelle",
+              "date": "2026-04-06T00:00:00",
+              "notes": "building a pre-req course (\"AI Assisted Coding Principles\") that's required before a user gets a license. Tom Stearns owns it, Roshan has to sign off on the video.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_38",
+              "name": "Schedule Phase 2 ILT sessions (April 20 \u2013 May 31)",
+              "owner": "Sandy Bauer",
+              "date": "2026-04-17T00:00:00",
+              "notes": "Source: Michelle rollout plan; Phase 2 sessions covering Wave 1 & 2 licensed users",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_39",
+          "name": "Training Readiness",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Training",
+          "subtasks": [
+            {
+              "id": "sub_40",
+              "name": "Tool-Agnostic Foundation (Prerequisite)",
+              "owner": "Michelle M",
+              "date": "2026-04-15T00:00:00",
+              "notes": "4/17: Pre-pilot with Jean's group validated the enrollment/learning-path flow on 4/16. Process confirmed working.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_41",
+              "name": "Tool Overview & Eligibility module \u2014",
+              "owner": "Michelle M / OTU",
+              "date": "2026-04-17T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_42",
+              "name": "Tool Sell Sheet \u2014 job aid for Tool Overview module",
+              "owner": "Lynn Vollbrecht",
+              "date": "2026-04-17T00:00:00",
+              "notes": "OTU developed; published via Roshan approval chain",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_43",
+              "name": "Setup & Readiness module",
+              "owner": "OTU",
+              "date": "2026-04-03T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_44",
+              "name": "OpenAI Academy access + navigation instructions",
+              "owner": "OTU",
+              "date": "2026-04-17T00:00:00",
+              "notes": "Needed so licensed users can self-serve into Academy content post-ILT",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_45",
+              "name": "Getting Started 101 ILT",
+              "owner": "OpenAI / Michelle M",
+              "date": "2026-04-17T00:00:00",
+              "notes": "4/17, 1 hr, OpenAI-led, Dev + Non-dev audience; Co-branded; delivered 1x/week; recording available as ILT alternative",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_46",
+              "name": "Pilot \"Getting Started 101\"",
+              "owner": "OpenAI / Michelle M",
+              "date": "2026-04-10T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_47",
+              "name": "Install instructions job aid (Mac + Windows)",
+              "owner": "OTU / Brian W",
+              "date": "TBD",
+              "notes": "Blocked by App Store work",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_48",
+              "name": "Secure Request Instructions",
+              "owner": "OTU",
+              "date": "TBD",
+              "notes": "Standard secure request: Complete. App Store variant: On Hold pending cert path decision (Brian W)",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_49",
+              "name": "Fiscal Responsibility attestation content",
+              "owner": "Michelle M",
+              "date": "2026-04-17T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_50",
+              "name": "Launch \"Getting Started 101\"",
+              "owner": "OpenAI / Michelle M",
+              "date": "2026-04-20T00:00:00",
+              "notes": "Scheduled April 20th; aligns to Wave 1 rollout window",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_51",
+              "name": "Fundamentals 201 ILT",
+              "owner": "OpenAI / Joydeep",
+              "date": "2026-04-17T00:00:00",
+              "notes": "Delivered 1x/week; 4/17, 1 hr, OpenAI-led, Dev audience",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_52",
+              "name": "Communities of Practice & Ongoing Support",
+              "owner": null,
+              "date": "2026-04-17T00:00:00",
+              "notes": "MS Teams support + Tools team sessions; content drops on changes/features/hot topics",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_53",
+              "name": "Codex user group: establish & launch",
+              "owner": "Alex",
+              "date": "TBD",
+              "notes": "4/17 debrief: Alex proposed centralizing all Wave 1 resources (deck, recording, roster, FAQ) on Codex Community site so team doesn't become 'traffic directors.' Approved.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_54",
+              "name": "Path to Advanced & Role-Based Training",
+              "owner": null,
+              "date": "TBD",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_55",
+              "name": "People Manager Training - budgeting & cost management",
+              "owner": "JP / Michelle M",
+              "date": "TBD",
+              "notes": "Per 4/17 debrief, Amy's bar for pilots = must be specific role-based learning. This should not be generic 'more Codex rollout.'",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_56",
+              "name": "Tiger Team added to training.",
+              "owner": "Michelle",
+              "date": "2026-04-17T00:00:00",
+              "notes": "Tiger Team is in the training but excluded from license-provisioning reports | 4/17 debrief: Michelle confirmed adding full Tiger Team to MyLearning path (training only, NOT Codex licenses). Eilyn scrubs completion reports against main Wave 1 census before sending to Sajid/Roshan - prevents accidental license provisioning for Tiger Team members.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_57",
+              "name": "Contractor Exception for MyLearning inaccessibility",
+              "owner": "Michelle",
+              "date": "tbd",
+              "notes": "Brought up by Michelle 4/21",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        },
+        {
+          "id": "task_58",
+          "name": "Quota Management",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Finance",
+          "subtasks": [
+            {
+              "id": "sub_59",
+              "name": "Establish Ownership of Quota Management & Process",
+              "owner": "JP / Matt",
+              "date": "2026-04-24T00:00:00",
+              "notes": "4/15 standup: Wave 1 runs per-seat ($29), no overage charges, no hard cutoffs. Coming-soon messaging confirmed for auto-escalation.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_60",
+              "name": "Establish Quota Levels and Tiers",
+              "owner": "JP / Matt",
+              "date": "2026-04-08T00:00:00",
+              "notes": "Establish quota per users and tiers for elevated usage and manager/budget owner approvals\nquestion: has this been socialized with OTLT?  \nQuestion: where is and what is the exception process when users exceed?",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_61",
+              "name": "Establish Tooling Best Practices for Effective Usage and Cost Controls",
+              "owner": "Jordan/Michelle",
+              "date": "2026-04-24T00:00:00",
+              "notes": "Develop training for users to enable self and business protection for effective use of tools at the lowest required cost.",
+              "risk": "",
+              "status": "Complete"
+            }
+          ]
+        },
+        {
+          "id": "task_62",
+          "name": "Quota Management Telemetry",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Finance",
+          "subtasks": [
+            {
+              "id": "sub_63",
+              "name": "Establish User Level Reporting",
+              "owner": "Brian/Sameer Khanna +FinOps",
+              "date": "2026-05-01T00:00:00",
+              "notes": "At Risk: Brian & JP to connect on reporting and privacy exposure chain.",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_64",
+          "name": "Budget & Recovery",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Finance",
+          "subtasks": [
+            {
+              "id": "sub_65",
+              "name": "Financial Data Gap Analysis and Requiremens per Agent Type",
+              "owner": "Matt/JP/Keith",
+              "date": "2026-04-24T00:00:00",
+              "notes": "Assess Gap between availalbe data and data required to achieve financial funding and recovery model requirements.  Financial requirement document to be provided to Jordan and Team for implemention within the Platform.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_66",
+              "name": "Clarify LLM Gateway vs Codex/ChatGPT cost lines for OTLT",
+              "owner": "Roshan / Matt / JP",
+              "date": "2026-04-22T00:00:00",
+              "notes": "4/15 standup:  flagged Azure OpenAI model usage rising (~$860K March). Roshan clarified: that is LLM Gateway API spend, unrelated to Codex/ChatGPT per-seat. Brian flagged forecasting gap on gateway infra costs. One-pager needed separating the two cost lines for leadership.",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_67",
+          "name": "Help desk + readiness + L2/L3",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Support",
+          "subtasks": [
+            {
+              "id": "sub_68",
+              "name": "Create community resources and host office hours",
+              "owner": "Brian W",
+              "date": "2026-04-10T00:00:00",
+              "notes": "office hours live 4/13. 7.30 am cst.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_69",
+              "name": "Defined Support Model",
+              "owner": "Brian W",
+              "date": null,
+              "notes": "4/15 standup: Roshan owns support, Satish (Brian's team) backup. Michelle covers Training + Support on kickoff deck (no mid-section handoff) to hold 30-min. Roshan adds color commentary.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_70",
+              "name": "Wave 1 onboarding friction \u2014 getting started surge",
+              "owner": "Brian W",
+              "date": "2026-04-10T00:00:00",
+              "notes": "Leveraging existing teams channel; brian evaluating additional resources to augment. Sitting solid for wave 1 given the lowered requirements for support out the gate | 4/14 meeting update: Roshan owns support channel; Satish (Brian's team) as backup. All Wave 1 users to be added to support channel after kickoff, even before formal OTU access email.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_71",
+              "name": "ServiceNow queues for Codex & Claude",
+              "owner": "Brian W",
+              "date": "2026-04-30T00:00:00",
+              "notes": "Not critical path for wave 1 but needs to be in place before wave 1 ends",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_72",
+          "name": "Comms + BU Leader",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Communication",
+          "subtasks": [
+            {
+              "id": "sub_73",
+              "name": "Draft email to CoS & CIOs",
+              "owner": "Lynn Vollbrecht",
+              "date": "2026-04-06T00:00:00",
+              "notes": "Explains access phases, builder vs user roles, and the Secure Request nomination process",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_74",
+              "name": "Working team approval of CIO email",
+              "owner": "Michelle McDonough",
+              "date": "2026-04-06T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_75",
+              "name": "Amy T + Jared B approval and awareness",
+              "owner": "Michelle McDonough",
+              "date": "2026-04-06T00:00:00",
+              "notes": "Exec visibility required before email sends",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_76",
+              "name": "Send CIO / CoS nomination email",
+              "owner": "TBD",
+              "date": "2026-04-06T00:00:00",
+              "notes": "Final send; date TBD pending approvals",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_77",
+              "name": "Audience-specific comms by user type (Dev, non-dev, leaders)",
+              "owner": "Kelsey / Rachel S",
+              "date": "2026-04-14T00:00:00",
+              "notes": "Tailored messaging per segment tied to approved user groups | 4/14 meeting update: Strong direction from Tami/Sajid \u2014 all content must be inclusive of non-devs. Equal framing for dev and non-dev, or role-agnostic. Remove 'engineering'-only language.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_78",
+              "name": "\"What to do next\" user guidance",
+              "owner": "Michelle M",
+              "date": "2026-04-14T00:00:00",
+              "notes": "Clear step-by-step path for users post-approval; pre-access \u2192 onboarding \u2192 first use | 4/14 meeting update: Must communicate staggered access (~300/day Mon\u2013Thu over 2 weeks). Michelle flagged risk of 3,000 rushing day one. Getting started content should be a clear checklist: email \u2192 pre-reqs \u2192 setup instructions (Mac + Windows links).",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_79",
+              "name": "Manager enablement toolkit (expectations + usage reinforcement)",
+              "owner": "Kelsey / Rachel S",
+              "date": "2026-04-14T00:00:00",
+              "notes": "Managers need resources to support teams through adoption | 4/14 meeting update: Deepa has draft slide covering enabling behaviors and measures. Feedback: narrow to 3 biggest-bang examples, number the items.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_80",
+              "name": "Leadership alignment and amplification plan",
+              "owner": "Kelsey / Rachel S",
+              "date": "2026-04-14T00:00:00",
+              "notes": "Drive adoption expectations from leadership down through org | 4/14 meeting update: Tami wants Wave 1 framed as a 'special opportunity' \u2014 participants helping shape rollout for rest of Optum Tech. Wave 2 (~6K) right behind, full rollout in June. Advocacy language needed.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_81",
+              "name": "Pre-contract messaging: seat-based, not credit-based yet",
+              "owner": "Kelsey / Rachel S",
+              "date": "2026-04-17T00:00:00",
+              "notes": "decision from 4/16 standup: no quota/credit presentation for wave 1. restrictions lifted. Must be in place for wave 2.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_82",
+              "name": "Kickoff deck v2 finalization",
+              "owner": "Alex / Lynn / Kelsey / Tami",
+              "date": "2026-04-16T00:00:00",
+              "notes": "4/14 2pm working session produced v2 - slides 5+7 merged, demo removed, manager-access caveat added to slide 12. Final ready before 4/17 kickoff. | 4/17: Delivered successfully at kickoff. Deck posted to meeting chat by Alex immediately after.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_83",
+              "name": "Onboarding email (post pre-req completion)",
+              "owner": "Lynn Vollbrecht",
+              "date": "2026-04-16T00:00:00",
+              "notes": "4/17 debrief: Screenshots need refreshing per Michelle - nothing should appear locked. Lynn coordinating with Sandy/Eilyn on send timing - OTU email goes AFTER user added to MyLearning, not before.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_84",
+              "name": "OTU access email - 300/day Wave 1 send",
+              "owner": "Lynn Vollbrecht",
+              "date": "2026-04-20T00:00:00",
+              "notes": "Ready to go.  | 4/17 debrief: Lynn walked through draft - single link to MyLearning with explicit instructions and screenshots. Michelle flagged: update screenshots so nothing shows 'locked' - all items should show available. Rachel set deadline: team sign-off by noon 4/17. Sends start Monday 4/20.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_85",
+              "name": "Post-kickoff FAQ update from chat Q&A",
+              "owner": "Kelsey Carlson",
+              "date": "2026-04-21T00:00:00",
+              "notes": "4/17 standup.  | 4/17 debrief: Kelsey running chat questions through ChatGPT to extract themes. Will fold into FAQ. Amy's direction: post follow-up message in chat - 'Thanks for great questions, we're updating FAQs, here's the link.' Many repeat questions (e.g. 'how do I get access?') despite being covered in slides.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_86",
+              "name": "Consolidate wave 1 resources on Codex Community site",
+              "owner": "Alex",
+              "date": "2026-04-21T00:00:00",
+              "notes": "4/17: determined posting deck, recording, roster, FAQ",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_87",
+              "name": "Post-kickoff chat follow-up message",
+              "owner": "Kelsey Carlson / Amy Thering",
+              "date": "2026-04-18T00:00:00",
+              "notes": "4/17 debrief: Amy directed - post message in kickoff chat thanking for questions, directing to updated FAQ link. Prevents team from fielding individual questions. Kelsey to post after FAQ themes extracted.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_88",
+              "name": "Onboarding email screenshots refresh",
+              "owner": "Lynn Vollbrecht / Eilyn Araya",
+              "date": "2026-04-18T00:00:00",
+              "notes": "4/17 debrief: Michelle flagged that MyLearning screenshots in Lynn's email show locked items. Must update to show all items as available/unlocked before Monday send. Lynn to coordinate with Eilyn on correct screenshots.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_89",
+              "name": "\"in case you missed it\" manager blast email",
+              "owner": "Kelsey / Amy",
+              "date": "2026-04-22T00:00:00",
+              "notes": "Point non-licensed managers to teams channel recording & the list for Waves",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        },
+        {
+          "id": "task_90",
+          "name": "Signoff",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Signoff",
+          "subtasks": [
+            {
+              "id": "sub_91",
+              "name": "FinanceSignoff",
+              "owner": "Michelle",
+              "date": "2026-04-20T00:00:00",
+              "notes": "4/17 standup: michell got approval from Matt",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_92",
+              "name": "SCIM Signoff",
+              "owner": "Uriah",
+              "date": null,
+              "notes": null,
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_93",
+              "name": "Training program accessible in Mylearning",
+              "owner": "Michelle M",
+              "date": "2026-04-17T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_94",
+              "name": "Training Telemetry in Place",
+              "owner": "Joydeep",
+              "date": null,
+              "notes": null,
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_95",
+              "name": "Verify users can self-complete setup without manual assistance",
+              "owner": "Brian W",
+              "date": "2026-04-17T00:00:00",
+              "notes": "remove",
+              "risk": "",
+              "status": "Complete"
+            }
+          ]
+        }
+      ],
+      "wsOrder": [
+        "Training",
+        "Finance",
+        "Support",
+        "Communication",
+        "Signoff"
+      ]
+    },
+    "Rollout": {
+      "tasks": [
+        {
+          "id": "task_96",
+          "name": "Wave 1  (4/20 - 4/30)",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Rollout",
+          "subtasks": [
+            {
+              "id": "sub_97",
+              "name": "Obtain GitHub Premium user list from Brian Warran",
+              "owner": "Michelle McDonough",
+              "date": "2026-03-31T00:00:00",
+              "notes": "Used to identify focus candidates for Wave 1",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_98",
+              "name": "CIO-aligned Prioritization - Wave 1",
+              "owner": "Roshan / Tiger Team",
+              "date": "2026-04-10T00:00:00",
+              "notes": "4/15 standup: Combined master list still in progress (Michelle); Alex needs access. Darcy (Steve's area) flagged some may be over quota - Tami guidance: 5% over OK, dramatic over needs follow-up.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_99",
+              "name": "User Selection",
+              "owner": "CIOs",
+              "date": "2026-04-10T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_100",
+              "name": "Wave 1 Approval",
+              "owner": null,
+              "date": "2026-04-14T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_101",
+              "name": "Direct Comms to Licensed Users",
+              "owner": null,
+              "date": "2026-04-15T00:00:00",
+              "notes": "Direct communication sequence to licensed users (invitation to register for ILT, office hours, etc.) that has to flow from the training side before or during each rollout wave.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_102",
+              "name": "Day-1 surge risk mitigation (Wave 1)",
+              "owner": "Michelle M / Brian W",
+              "date": "2026-04-15T00:00:00",
+              "notes": "4/14 meeting flagged risk of 3,000 users rushing access day one; staggered 300/day + clear what-to-do-next comms mitigates. Monitor Teams support channel load 4/20-4/24. | 4/17: Kickoff messaging reinforced staggered 300/day access. Users understand they won't all get access Monday. Chat questions showed some confusion but overall message landed.",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_103",
+              "name": "Daily enrollment schedule - Wave 1 (staggered ~300/day)",
+              "owner": "Eilyn Araya / Lynn Vollbrecht",
+              "date": "2026-04-30T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_104",
+              "name": "Pull training & license numbers for \"get to it\" email",
+              "owner": "Michelle / Roshan / Eilyn",
+              "date": "2026-04-29T00:00:00",
+              "notes": "These mertics to be shared in a blast email",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_105",
+              "name": "Send \"get to it\" email",
+              "owner": "Jacob",
+              "date": "2026-04-30T00:00:00",
+              "notes": "4/28: decision to pull data and send email",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_106",
+              "name": "Setup Oracle sessions",
+              "owner": "Michelle M",
+              "date": "2026-04-30T00:00:00",
+              "notes": "Training needs to setup the list of newly licensed users, for the wave, within Oracle training sessions",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_107",
+              "name": "Wave 1 Support",
+              "owner": null,
+              "date": "ongoing",
+              "notes": null,
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_108",
+              "name": "Wave 1 Feedback",
+              "owner": "Alex / Kelsey / Deepa",
+              "date": "ongoing",
+              "notes": "4/15 standup: Deepa open item - add structured feedback + pulse check-ins (Michelle/Dojo learnings). Aggregate office-hours feedback.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_109",
+              "name": "Feedback consoldiation",
+              "owner": "Alex / Kelsey / Deepa",
+              "date": "ongoing",
+              "notes": "4/21: new addition",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_110",
+              "name": "Source-of-truth spreadsheet for Wave 1 audit trail",
+              "owner": "Sandy Bauer / Eilyn Araya",
+              "date": "2026-04-30T00:00:00",
+              "notes": "4/17 debrief (Michelle): Tracks date added to MyLearning + date OTU comms sent for each user. Needed when users claim 'I didn't get it.' Sandy/Eilyn maintain. Batch enrollment dates logged as users are added.",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_111",
+          "name": "Wave 2  (5/18 - 5/28)",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Rollout",
+          "subtasks": [
+            {
+              "id": "sub_112",
+              "name": "Obtain GitHub Premium user list from Brian Warran",
+              "owner": "Michelle McDonough",
+              "date": "2026-03-31T00:00:00",
+              "notes": "Used to identify focus candidates for Wave 1",
+              "risk": "",
+              "status": "Complete"
+            },
+            {
+              "id": "sub_113",
+              "name": "Produce updated Census with HR applied filters",
+              "owner": "Deepa",
+              "date": "2026-04-29T00:00:00",
+              "notes": "send updated Census with HR applied filters",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_114",
+              "name": "Enhance Census list",
+              "owner": "Jamie",
+              "date": "2026-04-30T00:00:00",
+              "notes": "purge existing folks, add folks with codex already",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_115",
+              "name": "Comms to CIOs & Chiefs of Staff",
+              "owner": "Jamie / Amy",
+              "date": "2026-05-01T00:00:00",
+              "notes": "Distribution with reprioritization request",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_116",
+              "name": "Updated lists due from CIOs",
+              "owner": "Chiefs of Staff",
+              "date": "2026-05-08T00:00:00",
+              "notes": "Due date to receive updates to prioritization",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_117",
+              "name": "App Store experience for Wave 2 ready",
+              "owner": "Satish / Erich",
+              "date": "2026-05-16T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_118",
+              "name": "Training material updates",
+              "owner": "Michelle M",
+              "date": "2026-05-17T00:00:00",
+              "notes": "Updates specific to wave 2",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_119",
+              "name": "Go/No-Go Decision",
+              "owner": "Amy / Rachel",
+              "date": "2026-05-18T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_120",
+              "name": "Direct Comms to Licensed Users",
+              "owner": null,
+              "date": "2026-05-18T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_121",
+              "name": "Kickoff Meeting",
+              "owner": null,
+              "date": "2026-05-19T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_122",
+              "name": "Rollout - ~6,000 users (5K dev + 1K non-dev)",
+              "owner": null,
+              "date": "5/18 - 5/28",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_123",
+              "name": "Source-of-truth spreadsheet for Wave 2 audit trail",
+              "owner": "Sandy Bauer / Eilyn Araya",
+              "date": "2026-05-18T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_124",
+              "name": "Wave 2 Support",
+              "owner": null,
+              "date": "ongoing",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_125",
+              "name": "Wave 2 Feedback",
+              "owner": null,
+              "date": "ongoing",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        }
+      ],
+      "wsOrder": [
+        "Rollout"
+      ]
+    },
+    "Steady State": {
+      "tasks": [
+        {
+          "id": "task_126",
+          "name": "Performance & Analytics",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Steady-State",
+          "subtasks": [
+            {
+              "id": "sub_127",
+              "name": "Performance & Analytics plan",
+              "owner": "Brian W",
+              "date": null,
+              "notes": "We will bring Samir in to kick off plans",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        }
+      ],
+      "wsOrder": [
+        "Steady-State"
+      ]
+    }
+  },
+  "rollout": {
+    "Pre-conditions": {
+      "tasks": [
+        {
+          "id": "task_2",
+          "name": "Contract Negotiation and Renewal",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Contract",
+          "subtasks": [
+            {
+              "id": "sub_3",
+              "name": "New Contract Negotiations",
+              "owner": "Jordan",
+              "date": "TBD",
+              "notes": "Not a blocker.",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_4",
+          "name": "Access",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Access",
+          "subtasks": [
+            {
+              "id": "sub_5",
+              "name": "Legacy OpenAI account remediation",
+              "owner": "Roshan / OpenAI",
+              "date": "unclear",
+              "notes": "Out of 1,206 non-Business or Free accounts, 1,038 had 0 messages in the last 28 days.\n\t\u2022Cohort1a: 164 zero-use accounts were created after March 19, 2026, representing the most immediate activation opportunity.\n\t\u2022Cohort1b: 299 who had free account created and a duplicate business account and never the free account. \n\t\u2022Cohort2 :  874 zero-use accounts were created on or before March 19, 2026, indicating an older dormant population that should be reviewed with OpenAI. \n\t\u2022Among active non-Business accounts, Cohort3 : 49 had 1-9 messages, Cohort4 : 77 had 10-99, and Cohort5 : 42 had 100+",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        }
+      ],
+      "wsOrder": [
+        "Contract",
+        "Access"
+      ]
+    },
+    "Enablement": {
+      "tasks": [
+        {
+          "id": "task_6",
+          "name": "Training Readiness",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Training",
+          "subtasks": [
+            {
+              "id": "sub_7",
+              "name": "Training Dashboard Reporting build",
+              "owner": "Joydeep",
+              "date": "2026-05-15T00:00:00",
+              "notes": "Sourced from Michelle's plan (4/2 review). Build training reporting dashboard \u2014 tracks secure request approvals, enrollment, completion rates, and wave progress. Supports telemetry signoff gate.",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        },
+        {
+          "id": "task_8",
+          "name": "Training Readiness - OpenAI",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Training",
+          "subtasks": [
+            {
+              "id": "sub_9",
+              "name": "RAI: Cost & Usage module",
+              "owner": "OUT",
+              "date": "TBD",
+              "notes": "4/15 standup: Roshan confirmed OpenAI has NOT yet provided credit-consumption materials (contract still in negotiation).",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_10",
+              "name": "Continuous Learning",
+              "owner": "OpenAI",
+              "date": "TBD",
+              "notes": "Self-guided via OpenAI Academy (ongoing)",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        },
+        {
+          "id": "task_11",
+          "name": "Rollout Prep",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Training",
+          "subtasks": [
+            {
+              "id": "sub_12",
+              "name": "Schedule Broad Launch ILT sessions (June \u2013 September)",
+              "owner": "Sandy Bauer",
+              "date": "2026-05-20T00:00:00",
+              "notes": "open enrollment users post-broad launch",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        },
+        {
+          "id": "task_13",
+          "name": "Quota Management",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Finance",
+          "subtasks": [
+            {
+              "id": "sub_14",
+              "name": "Establish Ownership of Quota Management & Process",
+              "owner": "JP / Matt",
+              "date": null,
+              "notes": "4/15 standup: Wave 1 runs per-seat ($29), no overage charges, no hard cutoffs. Coming-soon messaging confirmed for auto-escalation.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_15",
+              "name": "Establish Quota Levels and Tiers",
+              "owner": "JP / Matt",
+              "date": null,
+              "notes": "Establish quota per users and tiers for elevated usage and manager/budget owner approvals\nquestion: has this been socialized with OTLT?  \nQuestion: where is and what is the exception process when users exceed?",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_16",
+              "name": "Establish Tooling Best Practices for Effective Usage and Cost Controls",
+              "owner": "Jordan/Michelle",
+              "date": null,
+              "notes": "Develop training for users to enable self and business protection for effective use of tools at the lowest required cost.",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_17",
+          "name": "Quota Management Telemetry",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Finance",
+          "subtasks": [
+            {
+              "id": "sub_18",
+              "name": "Establish Management & Department Cost Reporting for effective budget management.",
+              "owner": "JP/ Matt / Brian + Sameer",
+              "date": "2026-05-29T00:00:00",
+              "notes": "4/16 decision: wave 1 is seat-based, no cap; targeting post-wave 2 rollout for full solution; still solutioning",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_19",
+              "name": "Establish Leadership Best Practices for Budget Management and Cost Controls",
+              "owner": "Matt/JP/Michelle",
+              "date": "2026-05-29T00:00:00",
+              "notes": "Develop training for budget owners (Manager/Department/Division) to enable effective oversight and decision making.",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_20",
+              "name": "Design governance model for multi-tool cost management (Codex + Claude + others)",
+              "owner": "Matt/JP/Brian",
+              "date": "2026-05-29T00:00:00",
+              "notes": "Matt flagged: as a digital worker manager, must manage cost footprints across multiple AI services with different cost structures. Governance model must be tool-agnostic from the start.",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        },
+        {
+          "id": "task_21",
+          "name": "Budget & Recovery",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Finance",
+          "subtasks": [
+            {
+              "id": "sub_22",
+              "name": "Document and Establish Funding & Recovery Model - AI Tooling for Digital Workers",
+              "owner": "Matt/JP/Keith",
+              "date": "2026-05-15T00:00:00",
+              "notes": "(How Budgeted, Forecasted, Results with Process Flow).  Dependent on final platform design & rules.\nAssumed to be user driven cost that may or may not be covered in OT Labor Rates.  This would include direct tooling costs that can not be recovered via alignment to capital or operations and maintenance attributed AI Spend.  Pure SG&A Expense to be included in costs that determine OT Rates for onshore/offshore.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_23",
+              "name": "Document and Establish Funding & Recovery Model - Digital Workers",
+              "owner": "Matt/JP/Keith",
+              "date": "2026-05-15T00:00:00",
+              "notes": "(How Budgeted, Forecasted, Results with Process Flow).  Dependent on final platform design & rules.\nAssumed to be user driven cost that may or may not be covered in OT Labor Rates.  This would include direct tooling costs that can not be recovered via alignment to capital or operations and maintenance attributed AI Spend.  Pure SG&A Expense to be included in costs that determine OT Rates for onshore/offshore.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_24",
+              "name": "Document and Establish Funding & Recovery Model - Agentic Partners",
+              "owner": "Matt/JP/Keith",
+              "date": "2026-05-15T00:00:00",
+              "notes": "(How Budgeted, Forecasted, Results with Process Flow).  Dependent on final platform design & rules.\nAssumed to be user driven cost that may or may not be covered in OT Labor Rates.  This would include direct tooling costs that can not be recovered via alignment to capital or operations and maintenance attributed AI Spend.  Pure SG&A Expense to be included in costs that determine OT Rates for onshore/offshore.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_25",
+              "name": "Document and Establish Funding & Recovery Model - Enterprise Agents",
+              "owner": "Matt/JP/Keith",
+              "date": "TBD",
+              "notes": "(How Budgeted, Forecasted, Results with Process Flow).  Dependent on final platform design & rules.\nAssumed to be user driven cost that may or may not be covered in OT Labor Rates.  This would include direct tooling costs that can not be recovered via alignment to capital or operations and maintenance attributed AI Spend.  Pure SG&A Expense to be included in costs that determine OT Rates for onshore/offshore.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_26",
+              "name": "Document and Establish Funding & Recovery Model - Team Agents",
+              "owner": "Matt/JP/Keith",
+              "date": "TBD",
+              "notes": "(How Budgeted, Forecasted, Results with Process Flow).  Dependent on final platform design & rules.\nAssumed to be user driven cost that may or may not be covered in OT Labor Rates.  This would include direct tooling costs that can not be recovered via alignment to capital or operations and maintenance attributed AI Spend.  Pure SG&A Expense to be included in costs that determine OT Rates for onshore/offshore.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_27",
+              "name": "Establish Data Pipelines from LLM Sources",
+              "owner": "Matt/JP/Keith",
+              "date": "TBD",
+              "notes": "OpenAI, Anthropic, Google, CSPs, Internal Systems, GitHub, UAIS, etc.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_28",
+              "name": "Establish Enterprise Source of Truth for Financial Tracking.",
+              "owner": "Matt/JP/Keith",
+              "date": "TBD",
+              "notes": "Establish data requirements for implementation in upstream flows to achieve desired financial reporting requirements.  Example:  Where will capital activity data be initiated so it flows through processes to allocate cost and recover to capital programs and related business sponsors.",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_29",
+              "name": "Establish Pilot Budget, Forecasting, P&L Management",
+              "owner": "Matt/JP/Keith",
+              "date": "2026-05-15T00:00:00",
+              "notes": "Process execution pilot from budget setting to forecasting, to realization of cost and revenue.  Department Level (OT)",
+              "risk": "",
+              "status": "WIP"
+            }
+          ]
+        },
+        {
+          "id": "task_30",
+          "name": "Help desk + readiness + L2/L3",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Support",
+          "subtasks": []
+        },
+        {
+          "id": "task_31",
+          "name": "Comms + BU Leader",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Communication",
+          "subtasks": []
+        }
+      ],
+      "wsOrder": [
+        "Training",
+        "Finance",
+        "Support",
+        "Communication"
+      ]
+    },
+    "Steady State": {
+      "tasks": [
+        {
+          "id": "task_32",
+          "name": "Optimization and steady-state support",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Steady-State",
+          "subtasks": [
+            {
+              "id": "sub_33",
+              "name": "Matured Community",
+              "owner": "Brian W / Roshan",
+              "date": "2026-06-01T00:00:00",
+              "notes": "Community channels, office hours, and self-serve resources mature by 6/1.",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_34",
+              "name": "Route unready users to foundational training and decision trees",
+              "owner": "Michelle M",
+              "date": null,
+              "notes": "Users not ready for access need a learning path, not a hard block",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_35",
+              "name": "Identify and recruit Train the Trainer nominees",
+              "owner": "Michelle M",
+              "date": null,
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_36",
+              "name": "Schedule Train the Trainer sessions",
+              "owner": "Michelle M",
+              "date": "2026-06-26T00:00:00",
+              "notes": null,
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_37",
+              "name": "Define champion responsibilities and enablement materials",
+              "owner": "Sandy Bauer",
+              "date": "2026-04-17T00:00:00",
+              "notes": "Champions support adoption within BUs post-rollout",
+              "risk": "",
+              "status": "WIP"
+            },
+            {
+              "id": "sub_38",
+              "name": "Guardrails audit \u2014 assess and remediate bad habit formation post-Wave 1",
+              "owner": "Brian W / Michelle M",
+              "date": "2026-05-31T00:00:00",
+              "notes": "Post-Wave 1 review to identify patterns of misuse, cost overrun behaviors, or unsafe agentic practices. Develop remediation playbook and reinforce guardrails through targeted retraining if needed. Sourced from 4/2 call risk flag (Brian W).",
+              "risk": "",
+              "status": "Not Started"
+            },
+            {
+              "id": "sub_39",
+              "name": "Ongoing reinforcement mechanisms",
+              "owner": "Kelsey / Rachel S",
+              "date": null,
+              "notes": "Post-launch engagement to sustain momentum; not currently tracked",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        },
+        {
+          "id": "task_40",
+          "name": "Performance & Analytics",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Steady-State",
+          "subtasks": [
+            {
+              "id": "sub_41",
+              "name": "Performance & Analytics plan",
+              "owner": "Brian W",
+              "date": null,
+              "notes": "We will bring Samir in to kick off plans",
+              "risk": "",
+              "status": "Not Started"
+            }
+          ]
+        }
+      ],
+      "wsOrder": [
+        "Steady-State"
+      ]
+    },
+    "Rollout": {
+      "tasks": [
+        {
+          "id": "task_42",
+          "name": "Full Rollout",
+          "status": null,
+          "owner": "",
+          "date": null,
+          "notes": "",
+          "risk": "",
+          "ws": "Rollout",
+          "subtasks": []
+        }
+      ],
+      "wsOrder": [
+        "Rollout"
+      ]
+    }
+  }
+}
+</script>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+let allPhases  = {};
+let fullRolloutPhases = {};
+let activePhase = 0;
+let showCompleted = true;
+let activeView = 'waves';
+let openRows   = new Set();
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+const TODAY = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
+const SOON  = 14;
+
+const PHASE_COLORS = [
+  { color:'#B5540A', bg:'#FDF0E6', gateStyle:'background:#FDF0E6;color:#B5540A' },
+  { color:'#0A6E4E', bg:'#E6F6F0', gateStyle:'background:#E6F6F0;color:#0A6E4E' },
+  { color:'#1550A0', bg:'#E8EFFA', gateStyle:'background:#E8EFFA;color:#1550A0' },
+  { color:'#3B6D11', bg:'#EBF4E0', gateStyle:'background:#EBF4E0;color:#3B6D11' },
+];
+
+const PHASE_DEFAULTS = {
+  'Pre-conditions': { idx:0, label:'Phase 1', ...PHASE_COLORS[0], dates:'Apr 1 – Apr 24', gate:'SCIM + Finance sign-off',
+    why:'All technical prerequisites before any user gets access. If anything here slips, the rollout moves right.' },
+  'Enablement':     { idx:1, label:'Phase 2', ...PHASE_COLORS[1], dates:'Apr 8 – May 1', gate:'Training + support ready',
+    why:'Human infrastructure — training content, quota/billing setup, comms, and help-desk readiness.' },
+  'Rollout':        { idx:2, label:'Phase 3', ...PHASE_COLORS[2], dates:'Apr 8 – Jul 3', gate:'Wave complete ×3',
+    why:'Three-wave deployment so issues surface before going wider. Each wave requires its own approval and comms.' },
+  'Steady State':   { idx:3, label:'Phase 4', ...PHASE_COLORS[3], dates:'Jul 3 onward', gate:'BAU handoff',
+    why:'Post-rollout: value realization, train-the-trainer, communities of practice, and BAU transition.' },
+};
+
+const WORKSTREAM_PHASE = {
+  'Program Mgmt':'Pre-conditions','Contract':'Pre-conditions','Security':'Pre-conditions',
+  'Network':'Pre-conditions','Access':'Pre-conditions','DevEx':'Pre-conditions',
+  'Training':'Enablement','Finance':'Enablement','Support':'Enablement',
+  'Communication':'Enablement','Signoff':'Enablement','Go/No-Go':'Enablement',
+  'Rollout':'Rollout','Steady-State':'Steady State',
+};
+
+const RISK_KEYWORDS = ['at risk','escalate','unresponsive','blocker','delay','tbd','must confirm'];
+
+// ─── Status helpers ───────────────────────────────────────────────────────────
+const sNorm = s => {
+  if (!s) return 'notstarted';
+  const l = s.toLowerCase().replace(/[\s_\-]/g,'');
+  if (l.includes('complet')||l==='done') return 'complete';
+  if (l.includes('wip')||l.includes('progress')) return 'wip';
+  if (l.includes('block')) return 'blocked';
+  return 'notstarted';
+};
+const S_LABEL = { complete:'Complete', wip:'WIP', notstarted:'Not started', blocked:'Blocked' };
+const S_BADGE = { complete:'sb-complete', wip:'sb-wip', notstarted:'sb-notstarted', blocked:'sb-blocked' };
+const S_DOT   = { complete:'dot-done', wip:'dot-wip', notstarted:'dot-todo', blocked:'dot-blocked' };
+
+function fmtDate(d) {
+  if (!d) return '';
+  const date = d instanceof Date ? d : new Date(d);
+  if (isNaN(date)) return typeof d === 'string' ? d : '';
+  return date.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+}
+
+function dateStatus(d) {
+  if (!d) return '';
+  const date = d instanceof Date ? d : new Date(d);
+  if (isNaN(date)) return '';
+  if (date < TODAY) return 'overdue';
+  const soon = new Date(TODAY); soon.setDate(soon.getDate() + SOON);
+  if (date <= soon) return 'soon';
+  return '';
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function isRisky(notes) {
+  const l = (notes||'').toLowerCase();
+  return RISK_KEYWORDS.some(k => l.includes(k));
+}
+
+// ─── Load embedded data ──────────────────────────────────────────────────────
+function loadEmbeddedData() {
+  const dataEl = document.getElementById('embedded-data');
+  if (!dataEl) {
+    console.warn('No embedded data found');
+    return;
+  }
+  try {
+    const data = JSON.parse(dataEl.textContent);
+    allPhases = data.waves || {};
+    fullRolloutPhases = data.rollout || {};
+    setUpdated(null);
+    render();
+  } catch (e) {
+    console.error('Failed to parse embedded data:', e);
+  }
+}
+
+// ─── Progress helpers ─────────────────────────────────────────────────────────
+function calcPhaseProgress(phaseName) {
+  const phases = getCurrentPhases();
+  const pd = phases[phaseName];
+  if (!pd) return { done:0, wip:0, todo:0, total:0, pct:0, overdue:0 };
+  let done=0, wip=0, todo=0, overdue=0;
+  pd.tasks.forEach(t => {
+    const s = sNorm(t.status);
+    if (s==='complete') done++;
+    else if (s==='wip') wip++;
+    else todo++;
+    if (s !== 'complete' && t.date) {
+      const d = t.date instanceof Date ? t.date : new Date(t.date);
+      if (!isNaN(d) && d < TODAY) overdue++;
+    }
+  });
+  const total = done + wip + todo;
+  return { done, wip, todo, total, pct: total ? Math.round(done/total*100) : 0, overdue };
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function setUpdated(fn) {
+  const now = new Date();
+  document.getElementById('last-updated').textContent =
+    (fn ? fn + ' · ' : '') +
+    now.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' +
+    now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+}
+
+function render() {
+  renderTabs();
+  renderDetail(activePhase);
+}
+
+function getCurrentPhases() {
+  return activeView === 'fullrollout' ? fullRolloutPhases : allPhases;
+}
+
+function renderTabs() {
+  const phases = Object.entries(PHASE_DEFAULTS).sort((a,b) => a[1].idx - b[1].idx);
+  const currentPhases = getCurrentPhases();
+  const tabsId = activeView === 'fullrollout' ? 'phase-tabs-rollout' : 'phase-tabs';
+  document.getElementById(tabsId).innerHTML = phases.map(([name, meta]) => {
+    const p = calcPhaseProgress(name);
+    const isActive = meta.idx === activePhase;
+    return `<div class="phase-tab${isActive?' active':''}"
+      style="color:${meta.color}"
+      onclick="selectPhase(${meta.idx})">
+      <div class="tab-num" style="color:${meta.color}">${meta.label}</div>
+      <div class="tab-name">${esc(name)}</div>
+      <div class="tab-dates">${meta.dates}</div>
+      <div class="tab-gate" style="${meta.gateStyle}">${esc(meta.gate)}</div>
+      <div class="tab-bar-wrap"><div class="tab-bar" style="width:${p.pct}%;background:${meta.color}"></div></div>
+      <div class="tab-counts">
+        <span><span class="mini-dot" style="background:#2E6E1E"></span>${p.done}</span>
+        <span><span class="mini-dot" style="background:#B5540A"></span>${p.wip}</span>
+        <span><span class="mini-dot" style="background:#A09E98"></span>${p.todo}</span>
+        ${p.overdue ? `<span><span class="mini-dot" style="background:#B91C1C"></span>${p.overdue} late</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderDetail(phaseIdx) {
+  const phaseName = Object.keys(PHASE_DEFAULTS).find(k => PHASE_DEFAULTS[k].idx === phaseIdx);
+  if (!phaseName) return;
+  const meta = PHASE_DEFAULTS[phaseName];
+  const phases = getCurrentPhases();
+  const pd   = phases[phaseName];
+  const tasks = pd ? pd.tasks : [];
+
+  // ── Stats ──────────────────────────────────────────────────────────────────
+  const p = calcPhaseProgress(phaseName);
+  const statsHTML = `
+    <div class="stats-strip">
+      <span class="stat-pill sp-total"><span class="stat-dot" style="background:var(--border-md)"></span>${p.total} tasks</span>
+      <span class="stats-sep">·</span>
+      <span class="stat-pill sp-done"><span class="stat-dot" style="background:var(--done)"></span>${p.done} complete</span>
+      <span class="stat-pill sp-wip"><span class="stat-dot" style="background:var(--wip)"></span>${p.wip} in progress</span>
+      <span class="stat-pill sp-todo"><span class="stat-dot" style="background:var(--faint)"></span>${p.todo} not started</span>
+      ${p.overdue ? `<span class="stats-sep">·</span><span class="stat-pill sp-overdue"><span class="stat-dot" style="background:var(--over)"></span>${p.overdue} overdue</span>` : ''}
+    </div>`;
+
+  // ── Toggle bar ─────────────────────────────────────────────────────────────
+  const toggleHTML = `
+    <div class="toggle-bar">
+      <span class="toggle-label">Show completed:</span>
+      <div class="toggle-switch${showCompleted ? ' active' : ''}" onclick="toggleShowCompleted()">
+        <div class="toggle-switch-dot"></div>
+      </div>
+    </div>`;
+
+  // ── Task table rows ────────────────────────────────────────────────────────
+  let tableRows = '';
+  if (tasks.length === 0) {
+    tableRows = `<div class="no-results">No data for this phase.</div>`;
+  } else {
+    tasks.forEach(task => {
+      const s        = sNorm(task.status);
+      const dateStr  = fmtDate(task.date);
+      const ds       = dateStatus(task.date);
+      const isOpen   = openRows.has(task.id);
+      const subs     = task.subtasks;
+      const subDone  = subs.filter(sub => sNorm(sub.status) === 'complete').length;
+      const subTotal = subs.length;
+      const subPct   = subTotal ? Math.round(subDone/subTotal*100) : 0;
+
+      const displayOwner = task.owner ||
+        (subs.find(sub => sub.owner) || {}).owner || '';
+
+      let derivedStatus = sNorm(task.status);
+      if (subTotal > 0) {
+        const allComplete = subs.every(sub => sNorm(sub.status) === 'complete');
+        const allNotStarted = subs.every(sub => sNorm(sub.status) === 'notstarted');
+        if (allComplete) derivedStatus = 'complete';
+        else if (!allNotStarted) derivedStatus = 'wip';
+      }
+
+      const subRowsHTML = subs.length ? subs.map(sub => {
+        const ss    = sNorm(sub.status);
+        const subDs = sub.date ? dateStatus(sub.date) : '';
+        const subHidden = !showCompleted && ss === 'complete';
+        return `<div class="sub-row col-grid${ss==='complete'?' sub-done':''}${subHidden ? ' hidden' : ''}">
+          <div class="sub-dot-cell"><span class="sub-dot ${S_DOT[ss]}"></span></div>
+          <div class="sub-name-wrap">
+            <div class="sub-name">${esc(sub.name)}</div>
+            ${sub.notes ? `<div class="sub-notes">${esc(sub.notes)}</div>` : ''}
+          </div>
+          <div class="sub-owner-col">${sub.owner ? esc(sub.owner) : ''}</div>
+          <div class="sub-due${subDs?' '+subDs:''}">${fmtDate(sub.date)||'—'}</div>
+          <span class="status-badge ${S_BADGE[ss]}">${S_LABEL[ss]}</span>
+        </div>`;
+      }).join('') : `<div style="padding:10px 16px;font-size:11px;color:var(--faint);font-style:italic">No sub-steps recorded.</div>`;
+
+      let hidden = false;
+
+      tableRows += `
+        <div class="task-row-wrap${hidden?' hidden':''}${derivedStatus==='complete'?' completed':''}" id="wrap-${task.id}" data-row-id="${task.id}">
+          <div class="task-row col-grid${isOpen?' is-open':''}">
+            <div style="align-self:center">
+              <span class="ws-tag" style="background:${meta.bg};color:${meta.color}">${esc(task.ws)}</span>
+            </div>
+            <div class="task-name-cell">
+              <span class="task-name${subPct===100?' done':''}">${esc(task.name)}</span>
+              <span class="expand-chevron">›</span>
+              ${task.notes ? `<div class="task-note">${esc(task.notes)}</div>` : ''}
+            </div>
+            <div class="progress-cell">
+              ${subTotal > 0 ? `
+                <div class="progress-bar-wrap">
+                  <div class="progress-bar-fill" style="width:${subPct}%;background:${subPct===100?'var(--done)':meta.color}"></div>
+                </div>
+                <div class="progress-label${subPct===100?' all-done':''}">${subDone}/${subTotal} steps</div>
+              ` : `<div class="progress-label">—</div>`}
+            </div>
+            <div class="task-due">—</div>
+            <span class="status-badge ${S_BADGE[derivedStatus]}">${S_LABEL[derivedStatus]}</span>
+          </div>
+          <div class="sub-drawer${isOpen?' open':''}" id="drawer-${task.id}">
+            <div class="sub-drawer-inner">
+              ${subRowsHTML}
+            </div>
+          </div>
+        </div>`;
+    });
+  }
+
+  // ── Risks ──────────────────────────────────────────────────────────────────
+  const hasRiskCol = tasks.some(t => t.risk || t.subtasks.some(s => s.risk));
+  const risks = [];
+  tasks.forEach(task => {
+    if (hasRiskCol) {
+      if (task.risk) risks.push({ title: task.name, body: task.risk });
+      task.subtasks.forEach(sub => { if (sub.risk) risks.push({ title: sub.name, body: sub.risk }); });
+    } else {
+      if (isRisky(task.notes) && task.notes) risks.push({ title: task.name, body: task.notes });
+      task.subtasks.forEach(sub => {
+        const l = (sub.notes||'').toLowerCase();
+        if (['at risk','escalate','unresponsive'].some(k => l.includes(k)) && sub.notes)
+          risks.push({ title: sub.name, body: sub.notes });
+      });
+    }
+  });
+  const risksHTML = `
+    <div class="risks-wrap">
+      <div class="risks-header">
+        <span style="color:var(--over)">&#9888;</span>
+        Risks &amp; open questions
+        <span style="font-weight:400;color:var(--faint);text-transform:none;letter-spacing:0;font-size:11px">${risks.length ? risks.length + ' flagged' : '— none flagged'}</span>
+      </div>
+      ${risks.length
+        ? risks.map(r => `<div class="risk-row">
+            <div class="risk-icon">&#9888;</div>
+            <div><div class="risk-title">${esc(r.title)}</div><div class="risk-body">${esc(r.body)}</div></div>
+          </div>`).join('')
+        : `<div class="no-risks">No notes flagged as risks for this phase.</div>`}
+    </div>`;
+
+  // ── Assemble ───────────────────────────────────────────────────────────────
+  const panelId = activeView === 'fullrollout' ? 'detail-panel-rollout' : 'detail-panel';
+  const panel = document.getElementById(panelId);
+  panel.className = 'detail-panel visible';
+  panel.innerHTML = `
+    <div class="phase-header">
+      <div class="ph-left">
+        <div class="ph-label" style="color:${meta.color}">${meta.label} · ${esc(phaseName)}</div>
+        <div class="ph-title">${esc(phaseName)}</div>
+        <div class="ph-why">${esc(meta.why)}</div>
+      </div>
+      <div class="ph-right">
+        <div class="ph-gate">${esc(meta.gate)}</div>
+        <div class="ph-dates">${meta.dates}</div>
+      </div>
+    </div>
+    ${statsHTML}
+    ${toggleHTML}
+    <div class="task-table">
+      <div class="table-header col-grid">
+        <div class="th">Workstream</div>
+        <div class="th">Task</div>
+        <div class="th">Steps</div>
+        <div class="th">Due</div>
+        <div class="th">Status</div>
+      </div>
+      <div id="task-rows">${tableRows}</div>
+    </div>
+    ${risksHTML}
+    <div class="legend-strip">
+      <span style="font-size:11px;color:var(--faint)">Status:</span>
+      <span class="legend-item"><span class="mini-dot" style="background:var(--done)"></span>Complete</span>
+      <span class="legend-item"><span class="mini-dot" style="background:var(--wip)"></span>In Progress</span>
+      <span class="legend-item"><span class="mini-dot" style="background:var(--faint)"></span>Not Started</span>
+      <span class="legend-item"><span class="mini-dot" style="background:var(--blocked)"></span>Blocked</span>
+      <span style="margin-left:8px;font-size:11px;color:var(--faint)">Click any row to expand subtasks.</span>
+    </div>`;
+  attachRowClickHandlers();
+}
+
+// ─── Interaction ──────────────────────────────────────────────────────────────
+function toggleRow(id) {
+  if (openRows.has(id)) openRows.delete(id);
+  else openRows.add(id);
+
+  const isOpen = openRows.has(id);
+  const wrap   = document.getElementById('wrap-' + id);
+  const drawer = document.getElementById('drawer-' + id);
+  if (!wrap || !drawer) return;
+
+  const row = wrap.querySelector('.task-row');
+  if (row) {
+    if (isOpen) row.classList.add('is-open');
+    else        row.classList.remove('is-open');
+  }
+  if (isOpen) drawer.classList.add('open');
+  else drawer.classList.remove('open');
+}
+
+function attachRowClickHandlers() {
+  const panelId = activeView === 'fullrollout' ? 'detail-panel-rollout' : 'detail-panel';
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  const container = panel.querySelector('#task-rows');
+  if (!container) return;
+  container.addEventListener('click', function(e) {
+    const row = e.target.closest('.task-row');
+    if (!row) return;
+    const wrap = row.closest('[data-row-id]');
+    if (!wrap) return;
+    toggleRow(wrap.dataset.rowId);
+  });
+}
+
+function toggleShowCompleted() {
+  showCompleted = !showCompleted;
+  renderDetail(activePhase);
+}
+
+function selectPhase(idx) {
+  activePhase  = idx;
+  renderTabs();
+  renderDetail(idx);
+}
+
+function switchView(view) {
+  activeView = view;
+  activePhase = 0;
+  showCompleted = true;
+
+  const wavesTab = document.getElementById('view-tab-waves');
+  const rolloutTab = document.getElementById('view-tab-rollout');
+  if (view === 'waves') {
+    wavesTab.classList.add('active');
+    rolloutTab.classList.remove('active');
+  } else {
+    wavesTab.classList.remove('active');
+    rolloutTab.classList.add('active');
+  }
+
+  document.getElementById('view-waves').style.display = view === 'waves' ? 'block' : 'none';
+  document.getElementById('view-fullrollout').style.display = view === 'fullrollout' ? 'block' : 'none';
+
+  renderTabs();
+  renderDetail(0);
+}
+
+// ─── Initialize on page load ──────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', loadEmbeddedData);
+</script>
+
+</body>
+</html>
